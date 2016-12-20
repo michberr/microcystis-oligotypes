@@ -1,7 +1,7 @@
 ---
 title: "Microcystis Oligotype Analysis"
 author: "Michelle Berry"
-date: "July 2016"
+date: "December 2016"
 output:
   html_document: default
   pdf_document: default
@@ -20,7 +20,7 @@ knitr::opts_chunk$set(
 
 ```
 
-```{r message=FALSE, echo = FALSE}
+```{r message=FALSE}
 library(ggplot2)
 library(dplyr)
 library(grid)
@@ -77,6 +77,11 @@ erie_oligo_df <-
   gather(key = Oligotype, value = count, CTG, CTT, CCG)
 
 
+# Mean number of reads per sample
+mean(erie_oligo_df$ReadSums)
+
+# Median number of reads per sample
+hist(erie_oligo_df$ReadSums, main = "Histogram of sample read counts", xlab = "Read Sums")
 ```
 
 # Plot data
@@ -139,7 +144,8 @@ toxinplot <-
 toxinGrob <- ggplotGrob(toxinplot)
 oligoGrob <- ggplotGrob(oligoplot)
 
-toxinGrobWider <- gtable_add_cols(toxinGrob, widths = oligoGrob$widths[10])
+toxinGrobWider <- gtable_add_cols(toxinGrob, widths = oligoGrob$widths[11])
+toxinGrobWider <- gtable_add_cols(toxinGrobWider, widths = oligoGrob$widths[11])
 
 # rbind the two plots together
 plot <- rbind(oligoGrob, toxinGrobWider, size = "first")
@@ -186,7 +192,7 @@ ratio <-
   filter((CTG + CCG + CTT) > 0) 
 ```
 
-Look at the average ratio of CTG to CCG in July and August
+Look at the median ratio of CTG to CCG in July and August
 ```{r}
 ratio %>%
   filter(Month %in% c( "July", "August")) %>%
@@ -194,7 +200,7 @@ ratio %>%
   pander()
 ```
 
-Look at the average ratio of CTG to CCG in September and October
+Look at the median ratio of CTG to CCG in September and October
 ```{r}
 
 ratio %>%
@@ -212,7 +218,18 @@ CTG <-
   erie_oligo_df %>%
   filter(Oligotype == "CTG")
 
+# Spearman's correlation
 cor.test(CTG$count, CTG$ParMC, method = "spearman")
+
+CTG_plot <- ggplot(CTG, aes(x = count, y = ParMC)) + 
+  geom_point() + 
+  ggtitle("CTG abundance vs Microcystin-LR toxin") + 
+  xlab("CTG relative abundance") + 
+  ylab("Microcystin-LR concentration \n (ug/L)")
+
+ggsave("../plots/raw-plots/CTG_parmc.pdf", plot = CTG_plot, width = 7, height = 5) 
+
+CTG_plot
 ```
 
 
@@ -228,7 +245,7 @@ CTT <-
     filter(Oligotype == "CTT") 
 
 CTT %>%
-  summarise(median(count)) %>%
+  summarise(median(count), min(count), max(count)) %>%
   pander()
 
 ```
@@ -248,51 +265,8 @@ ggsave("../plots/raw-plots/CTT-distribution.pdf", plot = CTT_plot, width = 7, he
 CTT_plot
 ```
 
-Wilcoxon test to determine if there is a significant difference in CTT
-abundance at nearshore and offshore stations
-```{r}
-
-wilcox.test(count ~ Shore, data = CTT)
-
-```
-
-The wilcoxon test does not give very strong power because of small sample sizes and
-uneven classes. A permutational test for a significant difference in the medians
-would be more appropriate here. 
-
-
-```{r}
-# Permutation test to see if the medians of two distributions
-# are significantly different.  
-#
-# Args:
-#   x: numeric vector for first distribution 
-#   y: numeric vector for second distribution
-#   k: numer of permutations
-# Returns:
-#   a p-value 
-perm.test <- function(x, y, k = 10000) {
-  n1 <- length(x)
-  n2 <- length(y)
-  # Generate k different permutations of x and y
-  perms <- replicate(k, sample(c(x, y))) 
-  # Calculate the median for length x and length y
-  mediandifs <- apply(perms[1:n1, ], 2, median) - 
-    apply(perms[(n1 + 1):(n2 + n1), ], 2, median) 
-  # What fraction of permuted difference in medians are larger than the observed difference?
-  p <- sum(abs(mediandifs) > abs(median(x) - median(y)))/k 
-  return(p)
-}
-
-nearshoreCTT <- CTT %>% filter(Shore == "nearshore")
-offshoreCTT <- CTT %>% filter(Shore == "offshore")
-
-set.seed(1)
-perm.test(x = nearshoreCTT$count, y = offshoreCTT$count, k = 10000)
-
-```
-
-The permutation test gives a much more significant result
+We will not calculate a statistic with a wilcoxon or permutational test,
+because our data violates the assumption of independence. 
 
 
 # Supplementary figure 2
@@ -307,7 +281,7 @@ rax_tree <- read.tree("data//RAxML_bestTree.bs100_mlst")
 # Calculate patristic distances
 patristic <- cophenetic(rax_tree)
 
-# Remove NIES
+# Remove the outgroup (NIES483) pulled from genbank
 pat_dist <- as.dist(patristic[rownames(patristic) != "NIES483", colnames(patristic) != "NIES483"])
 
 ```
@@ -323,9 +297,20 @@ culture_oligos <-
     filter(sampID %in% labels(pat_dist)) 
 
 
-# Find the consensus oligotype for each culture
-ConsOligo <- apply(culture_oligos, MARGIN = 1, function(x) {names(which.max(x[2:6]))} )
-culture_oligos$ConsOligo <- ConsOligo
+# Most cultures have reads from multiple oligotype sequences.
+# This can be caused by sequencing errors, contamination during library prep, 
+# or contamination in the cultures.
+# This statement finds the consensus oligotype sequence for each culture i.e. the one with the maximum number of reads
+cons_oligo <- apply(culture_oligos[,2:6], MARGIN = 1, function(x) {names(which.max(x))} )
+
+# What percentage of the reads is the consensus sequence?
+apply(culture_oligos[,2:6], MARGIN = 1, function(x) {max(x)/sum(x)} )
+```
+With one exception (76.9%), the consensus sequence constitutes 94-100% of the reads.
+
+```{r}
+# Add consensus oligotype to data frame
+culture_oligos$ConsOligo <- cons_oligo
 
 # Order the samples the same as they are ordered in the tree
 target <- labels(pat_dist)
@@ -339,7 +324,7 @@ colnames(ham_dist) <- culture_oligos_sorted$sampID
 ham_dist <- as.dist(ham_dist)
 
 # Sanity check
-labels(ham_dist) == labels(pat_dist)
+all.equal(labels(ham_dist), labels(pat_dist))
 ```
 
 Plot hamming distance vs patristic distance
@@ -360,6 +345,11 @@ hamdist_plot <-
 ggsave("../plots/raw-plots/hamdist-vs-patristic-plot.pdf", plot = hamdist_plot, width = 7, height = 5) 
 
 hamdist_plot
+
+```
+
+```{r}
+sessionInfo()
 
 ```
 
