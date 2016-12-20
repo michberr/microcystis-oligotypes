@@ -1,0 +1,5 @@
+#"MLST" from genomes -- extract target genes from assembled genomes
+
+# The contigs were organized in folders per samples (Microcystis enrichments in our case) that contained the fasta file containing contig sequences. Run the following command, which runs a shell script that opens each folder (in our case the folder names all started with the name Sample_44), runs the blast search, and then runs a custom ruby script. This ruby script takes the blast output and extracts genes from the multifasta contigs file. The ruby and bach script are posted on the github page 
+
+for i in Sample_44*; do echo $i; bash ./mlst.sh ${i} &> ${i}.mlst.log; done 
